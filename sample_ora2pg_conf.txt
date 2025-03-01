@@ -1,0 +1,19 @@
+ORACLE_HOME       /usr/lib/oracle/12.2/client64
+ORACLE_DSN        undef
+INPUT_FILE        /path/to/our/oracle_export.sql
+ORACLE_CHARSET    SHIFT-JIS
+PG_CHARSET        UTF8
+EXPORT_SCHEMA     1
+EXPORT_TABLES     1
+EXPORT_INDEXES    1
+EXPORT_CONSTRAINTS 1
+EXPORT_TRIGGERS   1
+EXPORT_PROCEDURES 1
+EXPORT_FUNCTIONS  1
+TYPE_MAPPING      clob:text,blob:bytea
+OUTPUT_DIR        /path/to/output
+
+
+Then run
+
+ora2pg -c /path/to/config/file.conf -t SHOW_TABLE
