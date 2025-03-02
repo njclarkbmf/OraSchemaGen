@@ -11,6 +11,23 @@ OraSchemaGen is a modular Python tool for generating Oracle database schemas, in
 - Modular architecture for easy extension
 - Configurable via command-line options
 
+## Progress Tracking
+
+OraSchemaGen includes visual progress tracking using tqdm to provide real-time feedback during schema generation:
+
+- Progress bars for each schema being generated
+- Component-specific progress (tables, data, triggers, etc.)
+- File generation progress
+
+### Progress Options
+
+| Option | Description |
+|--------|-------------|
+| `--no-progress` | Disable progress bars for cleaner log output |
+
+Progress bars are particularly useful when generating large schemas with many rows of data, making it easy to track the generation status and estimate completion time.
+
+
 ## Installation
 
 ### Prerequisites

@@ -15,6 +15,7 @@ import argparse
 import logging
 import datetime
 from typing import List, Dict, Any, Optional
+from tqdm import tqdm
 
 from core import OracleObjectFactory, OutputHandler, TableInfo, OracleObject
 
@@ -121,15 +122,29 @@ class OraSchemaGenApp:
             action="store_true",
             help="Enable verbose logging"
         )
+
+        parser.add_argument(
+            "--quiet",
+            action="store_true",
+            help="Suppress INFO level logs"
+        )
+        
+        parser.add_argument(
+            "--no-progress",
+            action="store_true",
+            help="Disable progress bars"
+        )
         
         return parser.parse_args()
     
     def setup_environment(self, args: argparse.Namespace) -> None:
         """Setup the environment based on arguments"""
-        # Set log level based on verbose flag
+        # Set log level based on arguments
         if args.verbose:
             logging.getLogger().setLevel(logging.DEBUG)
             logger.debug("Verbose logging enabled")
+        elif args.quiet:
+            logging.getLogger().setLevel(logging.WARNING)
         
         # Set output directory
         self.output_dir = args.output_dir
@@ -164,11 +179,30 @@ class OraSchemaGenApp:
         # Process each specified schema
         schemas = args.schemas.split(",")
         
-        for schema in schemas:
+        # Set up the schema progress bar
+        schema_progress = tqdm(schemas, desc="Schemas", disable=args.no_progress)
+        
+        for schema in schema_progress:
             schema = schema.strip()
+            schema_progress.set_description(f"Schema: {schema}")
             logger.info(f"Generating objects for schema: {schema}")
             
+            # Define all possible components and collect active ones
+            all_components = []
+            all_components.append(("Tables", args.tables))
+            if args.data_rows > 0: all_components.append(("Data", args.data_rows))
+            if args.triggers > 0: all_components.append(("Triggers", args.triggers))
+            if args.procedures > 0: all_components.append(("Procedures", args.procedures))
+            if args.functions > 0: all_components.append(("Functions", args.functions))
+            if args.packages > 0: all_components.append(("Packages", args.packages))
+            if args.lobs > 0: all_components.append(("LOBs", args.lobs))
+            
+            # Create progress bar for components
+            component_progress = tqdm(all_components, desc="Components", leave=True, disable=args.no_progress)
+            
             # Generate tables first using SchemaGenerator
+            component_name, count = component_progress.iterable[0]
+            component_progress.set_description(f"{component_name} ({count})")
             schema_generator = self.generators[0]  # SchemaGenerator is always first
             table_objects = schema_generator.generate(
                 table_count=args.tables, 
@@ -176,56 +210,90 @@ class OraSchemaGenApp:
             )
             
             self.objects.extend(table_objects)
+            component_progress.update(1)
             
             # Extract TableInfo objects
             self.tables = schema_generator.get_tables()
             
             # Generate other objects using their respective generators
-            for generator in self.generators[1:]:  # Skip SchemaGenerator
+            generator_idx = 1  # Start with the second generator (after SchemaGenerator)
+            component_idx = 1  # Start with the second component (after Tables)
+            
+            while generator_idx < len(self.generators) and component_idx < len(all_components):
+                generator = self.generators[generator_idx]
                 generator_name = generator.__class__.__name__
+                component_name, count = all_components[component_idx]
                 
-                # Call the appropriate generator with the right parameters
-                if generator_name == 'DataGenerator' and args.data_rows > 0:
+                component_progress.set_description(f"{component_name} ({count})")
+                
+                # Match the generator to the right component
+                if generator_name == 'DataGenerator' and component_name == "Data":
                     objects = generator.generate(
                         tables=self.tables,
                         rows_per_table=args.data_rows
                     )
                     self.objects.extend(objects)
-                    
-                elif generator_name == 'TriggerGenerator' and args.triggers > 0:
+                    component_progress.update(1)
+                    generator_idx += 1
+                    component_idx += 1
+                
+                elif generator_name == 'TriggerGenerator' and component_name == "Triggers":
                     objects = generator.generate(
                         tables=self.tables,
                         num_triggers=args.triggers
                     )
                     self.objects.extend(objects)
-                    
-                elif generator_name == 'ProcedureGenerator' and args.procedures > 0:
+                    component_progress.update(1)
+                    generator_idx += 1
+                    component_idx += 1
+                
+                elif generator_name == 'ProcedureGenerator' and component_name == "Procedures":
                     objects = generator.generate(
                         tables=self.tables,
                         num_procedures=args.procedures
                     )
                     self.objects.extend(objects)
-                    
-                elif generator_name == 'FunctionGenerator' and args.functions > 0:
+                    component_progress.update(1)
+                    generator_idx += 1
+                    component_idx += 1
+                
+                elif generator_name == 'FunctionGenerator' and component_name == "Functions":
                     objects = generator.generate(
                         tables=self.tables,
                         num_functions=args.functions
                     )
                     self.objects.extend(objects)
-                    
-                elif generator_name == 'PackageGenerator' and args.packages > 0:
+                    component_progress.update(1)
+                    generator_idx += 1
+                    component_idx += 1
+                
+                elif generator_name == 'PackageGenerator' and component_name == "Packages":
                     objects = generator.generate(
                         tables=self.tables,
                         num_packages=args.packages
                     )
                     self.objects.extend(objects)
-                    
-                elif generator_name == 'LobGenerator' and args.lobs > 0:
+                    component_progress.update(1)
+                    generator_idx += 1
+                    component_idx += 1
+                
+                elif generator_name == 'LobGenerator' and component_name == "LOBs":
                     objects = generator.generate(
                         tables=self.tables,
                         num_lobs=args.lobs
                     )
                     self.objects.extend(objects)
+                    component_progress.update(1)
+                    generator_idx += 1
+                    component_idx += 1
+                
+                else:
+                    # Skip this component or generator if no match
+                    generator_idx += 1
+                    component_idx += 1
+            
+            # Close the component progress bar
+            component_progress.close()
     
     def save_generated_sql(self, args: argparse.Namespace) -> None:
         """Save all generated SQL to files"""
@@ -240,25 +308,35 @@ class OraSchemaGenApp:
         # Get timestamp for filename
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
+        # Set up progress bar for saving files
+        save_progress = tqdm(total=1, desc="Saving SQL files", disable=args.no_progress)
+        
         # Write objects to file(s)
         if args.single_file:
             output_file = f"oraschemagen_{timestamp}.sql"
             output_handler.write_objects(self.objects, output_file)
+            save_progress.update(1)
             logger.info(f"All SQL saved to: {os.path.join(self.output_dir, output_file)}")
             
             # Convert to Shift-JIS if requested
             if args.shift_jis:
+                shift_progress = tqdm(total=1, desc="Converting to Shift-JIS", disable=args.no_progress)
                 from core import EncodingHandler
                 input_file = os.path.join(self.output_dir, output_file)
                 output_file_sjis = os.path.join(self.output_dir, f"oraschemagen_{timestamp}_sjis.sql")
                 EncodingHandler.convert_to_shift_jis(input_file, output_file_sjis)
+                shift_progress.update(1)
+                shift_progress.close()
         else:
             output_handler.write_objects(self.objects, "")
+            save_progress.update(1)
             logger.info(f"SQL files saved to subdirectories in: {self.output_dir}")
             
             # Convert to Shift-JIS if requested
             if args.shift_jis:
                 logger.info("Converting files to Shift-JIS is not supported for multiple file output")
+        
+        save_progress.close()
     
     def run(self) -> int:
         """Run the application"""
@@ -269,13 +347,19 @@ class OraSchemaGenApp:
             # Setup environment
             self.setup_environment(args)
             
+            # Start the timer
+            start_time = datetime.datetime.now()
+            
             # Generate objects
             self.generate_objects(args)
             
             # Save generated SQL
             self.save_generated_sql(args)
             
-            logger.info("OraSchemaGen completed successfully!")
+            # Calculate and display execution time
+            end_time = datetime.datetime.now()
+            execution_time = end_time - start_time
+            logger.info(f"OraSchemaGen completed successfully in {execution_time}!")
             return 0
             
         except Exception as e:
