@@ -27,7 +27,7 @@ Oracle Database 12c Release 2 through 19c.
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/OraSchemaGen.git
+git clone git@github.com:njclarkbmf/OraSchemaGen.git
 cd OraSchemaGen
 ```
 
