@@ -128,7 +128,7 @@ CREATE OR REPLACE PROCEDURE RELOCATE_DEPARTMENT(
   p_department_id IN NUMBER,
   p_new_location_id IN NUMBER,
   p_effective_date IN DATE DEFAULT SYSDATE,
-  p_notify_employees IN BOOLEAN DEFAULT TRUE
+  p_notify_employees IN VARCHAR2 DEFAULT 'Y'
 )
 IS
   l_dept_exists NUMBER;
@@ -138,75 +138,72 @@ IS
   l_old_location_city VARCHAR2(30);
   l_new_location_city VARCHAR2(30);
   l_employee_count NUMBER;
+  l_do_notify BOOLEAN;
 BEGIN
+  -- Convert VARCHAR2 flag to BOOLEAN for internal use
+  l_do_notify := (UPPER(p_notify_employees) IN ('Y', 'YES', 'TRUE', '1'));
+
   -- Input validation
   -- Check if department exists
   SELECT COUNT(*), DEPARTMENT_NAME, LOCATION_ID
   INTO l_dept_exists, l_dept_name, l_old_location_id
   FROM DEPARTMENTS
   WHERE DEPARTMENT_ID = p_department_id;
-  
+
   IF l_dept_exists = 0 THEN
     RAISE_APPLICATION_ERROR(-20001, 'Department ID does not exist');
   END IF;
-  
+
   -- No change needed if same location
   IF l_old_location_id = p_new_location_id THEN
     RAISE_APPLICATION_ERROR(-20002, 'Department is already at this location');
   END IF;
-  
+
   -- Check if new location exists
   SELECT COUNT(*), CITY
   INTO l_location_exists, l_new_location_city
   FROM LOCATIONS
   WHERE LOCATION_ID = p_new_location_id;
-  
+
   IF l_location_exists = 0 THEN
     RAISE_APPLICATION_ERROR(-20003, 'Location ID does not exist');
   END IF;
-  
+
   -- Get old location city
   SELECT CITY INTO l_old_location_city
   FROM LOCATIONS
   WHERE LOCATION_ID = l_old_location_id;
-  
+
   -- Update the department
   UPDATE DEPARTMENTS
   SET LOCATION_ID = p_new_location_id
   WHERE DEPARTMENT_ID = p_department_id;
-  
+
   -- Log the relocation
-  DBMS_OUTPUT.PUT_LINE('Department ' || l_dept_name || ' (ID: ' || p_department_id || 
-                      ') relocated from ' || l_old_location_city || 
+  DBMS_OUTPUT.PUT_LINE('Department ' || l_dept_name || ' (ID: ' || p_department_id ||
+                      ') relocated from ' || l_old_location_city ||
                       ' to ' || l_new_location_city ||
                       ' effective ' || TO_CHAR(p_effective_date, 'YYYY-MM-DD'));
-  
+
   -- Notify employees if requested
-  IF p_notify_employees THEN
+  IF l_do_notify THEN
     -- Count affected employees
     SELECT COUNT(*) INTO l_employee_count
     FROM EMPLOYEES
     WHERE DEPARTMENT_ID = p_department_id;
-    
-    DBMS_OUTPUT.PUT_LINE('Notification: ' || l_employee_count || 
+
+    DBMS_OUTPUT.PUT_LINE('Notification: ' || l_employee_count ||
                          ' employees will be notified about the relocation of department ' ||
-                         l_dept_name || ' from ' || l_old_location_city || 
+                         l_dept_name || ' from ' || l_old_location_city ||
                          ' to ' || l_new_location_city);
-    
-    -- In a real system, this would call a notification procedure
-    -- NOTIFY_DEPARTMENT_EMPLOYEES(
-    --   p_department_id => p_department_id,
-    --   p_message => 'Your department is relocating to ' || l_new_location_city || 
-    --               ' effective ' || TO_CHAR(p_effective_date, 'YYYY-MM-DD')
-    -- );
   END IF;
-  
+
   COMMIT;
 EXCEPTION
   WHEN OTHERS THEN
     -- Roll back any changes
     ROLLBACK;
-    
+
     -- Re-raise the error
     RAISE;
 END RELOCATE_DEPARTMENT;
@@ -696,7 +693,7 @@ END ADD_ORDER_ITEM;
 CREATE OR REPLACE PROCEDURE PURGE_OLD_DATA(
   p_months_old IN NUMBER DEFAULT 36,
   p_batch_size IN NUMBER DEFAULT 1000,
-  p_dry_run IN BOOLEAN DEFAULT TRUE,
+  p_dry_run IN VARCHAR2 DEFAULT 'Y',
   p_rows_deleted OUT NUMBER
 )
 IS
@@ -704,26 +701,30 @@ IS
   l_orders_deleted NUMBER := 0;
   l_items_deleted NUMBER := 0;
   l_continue BOOLEAN := TRUE;
+  l_is_dry_run BOOLEAN;
   l_batch_count NUMBER;
 BEGIN
+  -- Convert VARCHAR2 flag to BOOLEAN for internal use
+  l_is_dry_run := (UPPER(p_dry_run) IN ('Y', 'YES', 'TRUE', '1'));
+
   p_rows_deleted := 0;
-  
+
   DBMS_OUTPUT.PUT_LINE('Purge operation started at ' || TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS'));
   DBMS_OUTPUT.PUT_LINE('Cutoff date: ' || TO_CHAR(l_cutoff_date, 'YYYY-MM-DD'));
-  
-  IF p_dry_run THEN
+
+  IF l_is_dry_run THEN
     DBMS_OUTPUT.PUT_LINE('DRY RUN MODE - No data will be deleted');
   END IF;
-  
+
   -- Count and report rows that would be deleted
   SELECT COUNT(*)
   INTO l_batch_count
   FROM ORDERS
   WHERE ORDER_DATE < l_cutoff_date
   AND STATUS IN ('COMPLETED', 'CANCELLED', 'RETURNED', 'REFUNDED');
-  
+
   DBMS_OUTPUT.PUT_LINE('Orders eligible for deletion: ' || l_batch_count);
-  
+
   SELECT COUNT(*)
   INTO l_batch_count
   FROM ORDER_ITEMS
@@ -733,14 +734,14 @@ BEGIN
     WHERE ORDER_DATE < l_cutoff_date
     AND STATUS IN ('COMPLETED', 'CANCELLED', 'RETURNED', 'REFUNDED')
   );
-  
+
   DBMS_OUTPUT.PUT_LINE('Order items eligible for deletion: ' || l_batch_count);
-  
+
   -- Exit if dry run
-  IF p_dry_run THEN
+  IF l_is_dry_run THEN
     RETURN;
   END IF;
-  
+
   -- Process in batches to avoid excessive locking
   WHILE l_continue LOOP
     -- Delete order items first (child records)
@@ -752,10 +753,10 @@ BEGIN
       AND STATUS IN ('COMPLETED', 'CANCELLED', 'RETURNED', 'REFUNDED')
       AND ROWNUM <= p_batch_size
     );
-    
+
     l_batch_count := SQL%ROWCOUNT;
     l_items_deleted := l_items_deleted + l_batch_count;
-    
+
     -- Exit if no more items to delete
     IF l_batch_count = 0 THEN
       l_continue := FALSE;
@@ -769,30 +770,30 @@ BEGIN
         AND STATUS IN ('COMPLETED', 'CANCELLED', 'RETURNED', 'REFUNDED')
         AND ROWNUM <= p_batch_size
       );
-      
+
       l_batch_count := SQL%ROWCOUNT;
       l_orders_deleted := l_orders_deleted + l_batch_count;
-      
+
       -- Commit after each batch
       COMMIT;
-      
+
       DBMS_OUTPUT.PUT_LINE('Deleted batch: ' || l_batch_count || ' orders');
     END IF;
   END LOOP;
-  
+
   p_rows_deleted := l_orders_deleted + l_items_deleted;
-  
+
   DBMS_OUTPUT.PUT_LINE('Purge operation completed at ' || TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS'));
-  DBMS_OUTPUT.PUT_LINE('Total deleted: ' || l_orders_deleted || ' orders and ' || 
+  DBMS_OUTPUT.PUT_LINE('Total deleted: ' || l_orders_deleted || ' orders and ' ||
                        l_items_deleted || ' order items');
   DBMS_OUTPUT.PUT_LINE('Total rows affected: ' || p_rows_deleted);
-  
+
   COMMIT;
 EXCEPTION
   WHEN OTHERS THEN
     -- Roll back any changes
     ROLLBACK;
-    
+
     -- Re-raise the error
     RAISE;
 END PURGE_OLD_DATA;
@@ -1226,118 +1227,113 @@ END GENERATE_TEST_DATA;
         email_proc.sql = """-- Procedure to validate email addresses
 CREATE OR REPLACE PROCEDURE VALIDATE_EMAIL(
   p_email IN VARCHAR2,
-  p_is_valid OUT BOOLEAN,
+  p_is_valid OUT VARCHAR2,
   p_error_message OUT VARCHAR2
 )
 IS
 BEGIN
-  -- Initialize output parameters
-  p_is_valid := TRUE;
+  -- Initialize output parameters ('Y' = valid, 'N' = invalid)
+  p_is_valid := 'Y';
   p_error_message := NULL;
-  
+
   -- Basic validation checks
   IF p_email IS NULL THEN
-    p_is_valid := FALSE;
+    p_is_valid := 'N';
     p_error_message := 'Email address cannot be null';
     RETURN;
   END IF;
-  
+
   -- Check for minimum length
   IF LENGTH(p_email) < 6 THEN
-    p_is_valid := FALSE;
+    p_is_valid := 'N';
     p_error_message := 'Email address is too short';
     RETURN;
   END IF;
-  
+
   -- Check for @ symbol
   IF INSTR(p_email, '@') = 0 THEN
-    p_is_valid := FALSE;
+    p_is_valid := 'N';
     p_error_message := 'Email address must contain @ symbol';
     RETURN;
   END IF;
-  
+
   -- Check format using regular expression
-  IF NOT REGEXP_LIKE(p_email, '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}) THEN
-    p_is_valid := FALSE;
+  IF NOT REGEXP_LIKE(p_email, '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$') THEN
+    p_is_valid := 'N';
     p_error_message := 'Email address format is invalid';
     RETURN;
   END IF;
-  
+
   -- Check for consecutive dots
   IF INSTR(p_email, '..') > 0 THEN
-    p_is_valid := FALSE;
+    p_is_valid := 'N';
     p_error_message := 'Email address contains consecutive dots';
     RETURN;
   END IF;
-  
-  -- Check for Japanese characters (if present, not invalid but flag it)
-  IF REGEXP_LIKE(p_email, '[\\p{IsHiragana}\\p{IsKatakana}\\p{IsHan}]') THEN
-    p_error_message := 'Warning: Email contains Japanese characters which may cause compatibility issues';
-  END IF;
-  
+
   -- Email is valid
-  p_is_valid := TRUE;
+  p_is_valid := 'Y';
 END VALIDATE_EMAIL;
 /"""
         self.objects.append(email_proc)
-        
+
         # Procedure to validate postal codes
         postal_proc = OracleObject("VALIDATE_POSTAL_CODE", "PROCEDURE")
         postal_proc.sql = """-- Procedure to validate postal codes based on country
 CREATE OR REPLACE PROCEDURE VALIDATE_POSTAL_CODE(
   p_postal_code IN VARCHAR2,
   p_country IN VARCHAR2,
-  p_is_valid OUT BOOLEAN,
+  p_is_valid OUT VARCHAR2,
   p_error_message OUT VARCHAR2
 )
 IS
 BEGIN
-  -- Initialize output parameters
-  p_is_valid := TRUE;
+  -- Initialize output parameters ('Y' = valid, 'N' = invalid)
+  p_is_valid := 'Y';
   p_error_message := NULL;
-  
+
   -- Handle NULL values
   IF p_postal_code IS NULL THEN
-    p_is_valid := FALSE;
+    p_is_valid := 'N';
     p_error_message := 'Postal code cannot be null';
     RETURN;
   END IF;
-  
+
   -- Check based on country
   CASE UPPER(p_country)
-    -- Japanese postal code validation (NNN-NNNN)
+    -- Japanese postal code validation (NNN-NNNN or NNNNNNN)
     WHEN 'JAPAN' THEN
-      IF NOT REGEXP_LIKE(p_postal_code, '^[0-9]{3}-[0-9]{4}) AND 
-         NOT REGEXP_LIKE(p_postal_code, '^[0-9]{7}) THEN
-        p_is_valid := FALSE;
+      IF NOT REGEXP_LIKE(p_postal_code, '^[0-9]{3}-[0-9]{4}$') AND
+         NOT REGEXP_LIKE(p_postal_code, '^[0-9]{7}$') THEN
+        p_is_valid := 'N';
         p_error_message := 'Japanese postal code must be in format NNN-NNNN or NNNNNNN';
       END IF;
-    
+
     -- US zip code validation (NNNNN or NNNNN-NNNN)
     WHEN 'USA' THEN
-      IF NOT REGEXP_LIKE(p_postal_code, '^[0-9]{5}(-[0-9]{4})?) THEN
-        p_is_valid := FALSE;
+      IF NOT REGEXP_LIKE(p_postal_code, '^[0-9]{5}(-[0-9]{4})?$') THEN
+        p_is_valid := 'N';
         p_error_message := 'US zip code must be in format NNNNN or NNNNN-NNNN';
       END IF;
-    
-    -- UK postcode validation (more complex pattern)
+
+    -- UK postcode validation
     WHEN 'UK' THEN
-      IF NOT REGEXP_LIKE(p_postal_code, '^[A-Z]{1,2}[0-9][A-Z0-9]? [0-9][A-Z]{2}, 'i') THEN
-        p_is_valid := FALSE;
+      IF NOT REGEXP_LIKE(p_postal_code, '^[A-Z]{1,2}[0-9][A-Z0-9]? [0-9][A-Z]{2}$', 'i') THEN
+        p_is_valid := 'N';
         p_error_message := 'UK postcode format is invalid';
       END IF;
-    
+
     -- Canadian postal code validation (ANA NAN)
     WHEN 'CANADA' THEN
-      IF NOT REGEXP_LIKE(p_postal_code, '^[A-Z][0-9][A-Z] [0-9][A-Z][0-9], 'i') THEN
-        p_is_valid := FALSE;
+      IF NOT REGEXP_LIKE(p_postal_code, '^[A-Z][0-9][A-Z] [0-9][A-Z][0-9]$', 'i') THEN
+        p_is_valid := 'N';
         p_error_message := 'Canadian postal code must be in format ANA NAN';
       END IF;
-    
+
     -- Default validation - just check for alphanumeric characters
     ELSE
-      IF NOT REGEXP_LIKE(p_postal_code, '^[A-Z0-9 -]+, 'i') THEN
-        p_is_valid := FALSE;
+      IF NOT REGEXP_LIKE(p_postal_code, '^[A-Z0-9 -]+$', 'i') THEN
+        p_is_valid := 'N';
         p_error_message := 'Postal code contains invalid characters';
       END IF;
   END CASE;

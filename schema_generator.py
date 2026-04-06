@@ -221,13 +221,16 @@ class SchemaGenerator(OracleObjectGenerator):
         
     def _generate_indexes_and_constraints(self, include_storage: bool = True) -> None:
         """Generate indexes and constraints for tables"""
+        # Build set of created table names for dependency checking
+        created_tables = {t.name for t in self.tables}
+
         # Generate unique indexes for unique constraints
         for table_info in self.tables:
             table_name = table_info.name
             for col in table_info.columns:
                 if 'constraints' in col and 'UNIQUE' in col['constraints']:
                     idx_name = f"{table_name}_{col['name']}_UK"
-                    
+
                     # Create index object
                     index_obj = OracleObject(idx_name, "INDEX")
                     storage_clause = ""
@@ -237,79 +240,150 @@ TABLESPACE USERS PCTFREE 10 INITRANS 2 MAXTRANS 255 COMPUTE STATISTICS
 STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
 PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
 BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)"""
-                    
+
                     index_obj.sql = f"""-- Unique Index for {col['name']} column
 CREATE UNIQUE INDEX {idx_name} ON {table_name}({col['name']}){storage_clause};"""
                     index_obj.add_dependency(table_name)
                     self.objects.append(index_obj)
-        
-        # Generate foreign key constraints
-        constraint_obj = OracleObject("FOREIGN_KEYS", "CONSTRAINT")
-        constraint_obj.sql = """-- Foreign Key Constraints
-ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_DEPT_FK
-  FOREIGN KEY (DEPARTMENT_ID) REFERENCES DEPARTMENTS (DEPARTMENT_ID)
-  ENABLE VALIDATE;
-  
-ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_JOB_FK
-  FOREIGN KEY (JOB_ID) REFERENCES JOBS (JOB_ID)
-  ENABLE VALIDATE;
 
-ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_MANAGER_FK
-  FOREIGN KEY (MANAGER_ID) REFERENCES EMPLOYEES (EMPLOYEE_ID)
-  ENABLE VALIDATE;
-  
-ALTER TABLE DEPARTMENTS ADD CONSTRAINT DEPT_MGR_FK
-  FOREIGN KEY (MANAGER_ID) REFERENCES EMPLOYEES (EMPLOYEE_ID)
-  ENABLE VALIDATE;
-  
-ALTER TABLE DEPARTMENTS ADD CONSTRAINT DEPT_LOC_FK
-  FOREIGN KEY (LOCATION_ID) REFERENCES LOCATIONS (LOCATION_ID)
-  ENABLE VALIDATE;
+        # Generate foreign key constraints - only for tables that actually exist
+        fk_statements = []
+        fk_deps = set()
 
-ALTER TABLE ORDERS ADD CONSTRAINT ORD_CUST_FK
-  FOREIGN KEY (CUSTOMER_ID) REFERENCES CUSTOMERS (CUSTOMER_ID)
-  ENABLE VALIDATE;
-  
-ALTER TABLE ORDERS ADD CONSTRAINT ORD_EMP_FK
-  FOREIGN KEY (SALESPERSON_ID) REFERENCES EMPLOYEES (EMPLOYEE_ID)
-  ENABLE VALIDATE;
-  
-ALTER TABLE ORDER_ITEMS ADD CONSTRAINT ORDITM_ORD_FK
-  FOREIGN KEY (ORDER_ID) REFERENCES ORDERS (ORDER_ID)
-  ENABLE VALIDATE;
-  
-ALTER TABLE ORDER_ITEMS ADD CONSTRAINT ORDITM_PROD_FK
-  FOREIGN KEY (PRODUCT_ID) REFERENCES PRODUCTS (PRODUCT_ID)
-  ENABLE VALIDATE;"""
-        constraint_obj.add_dependency("EMPLOYEES")
-        constraint_obj.add_dependency("DEPARTMENTS")
-        constraint_obj.add_dependency("JOBS")
-        constraint_obj.add_dependency("LOCATIONS")
-        constraint_obj.add_dependency("ORDERS")
-        constraint_obj.add_dependency("ORDER_ITEMS")
-        constraint_obj.add_dependency("PRODUCTS")
-        constraint_obj.add_dependency("CUSTOMERS")
-        self.objects.append(constraint_obj)
-        
-        # Add check constraints
-        check_obj = OracleObject("CHECK_CONSTRAINTS", "CONSTRAINT")
-        check_obj.sql = """-- Check Constraints
-ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_SALARY_MIN
-  CHECK (SALARY > 0) ENABLE VALIDATE;
-  
-ALTER TABLE JOBS ADD CONSTRAINT JOB_SALARY_RANGE
-  CHECK (MIN_SALARY < MAX_SALARY) ENABLE VALIDATE;
-  
-ALTER TABLE ORDER_ITEMS ADD CONSTRAINT ORDITM_QTY_MIN
-  CHECK (QUANTITY > 0) ENABLE VALIDATE;
-  
-ALTER TABLE PRODUCTS ADD CONSTRAINT PROD_PRICE_MIN
-  CHECK (LIST_PRICE >= 0) ENABLE VALIDATE;"""
-        check_obj.add_dependency("EMPLOYEES")
-        check_obj.add_dependency("JOBS")
-        check_obj.add_dependency("ORDER_ITEMS")
-        check_obj.add_dependency("PRODUCTS")
-        self.objects.append(check_obj)
+        # EMPLOYES -> DEPARTMENTS (only if both exist)
+        if 'EMPLOYEES' in created_tables and 'DEPARTMENTS' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_DEPT_FK\n"
+                "  FOREIGN KEY (DEPARTMENT_ID) REFERENCES DEPARTMENTS (DEPARTMENT_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("EMPLOYEES")
+            fk_deps.add("DEPARTMENTS")
+
+        # EMPLOYEES -> JOBS
+        if 'EMPLOYEES' in created_tables and 'JOBS' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_JOB_FK\n"
+                "  FOREIGN KEY (JOB_ID) REFERENCES JOBS (JOB_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("EMPLOYEES")
+            fk_deps.add("JOBS")
+
+        # EMPLOYEES self-reference (MANAGER_ID)
+        if 'EMPLOYEES' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_MANAGER_FK\n"
+                "  FOREIGN KEY (MANAGER_ID) REFERENCES EMPLOYEES (EMPLOYEE_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("EMPLOYEES")
+
+        # DEPARTMENTS -> EMPLOYEES (manager)
+        if 'DEPARTMENTS' in created_tables and 'EMPLOYEES' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE DEPARTMENTS ADD CONSTRAINT DEPT_MGR_FK\n"
+                "  FOREIGN KEY (MANAGER_ID) REFERENCES EMPLOYEES (EMPLOYEE_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("DEPARTMENTS")
+            fk_deps.add("EMPLOYEES")
+
+        # DEPARTMENTS -> LOCATIONS
+        if 'DEPARTMENTS' in created_tables and 'LOCATIONS' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE DEPARTMENTS ADD CONSTRAINT DEPT_LOC_FK\n"
+                "  FOREIGN KEY (LOCATION_ID) REFERENCES LOCATIONS (LOCATION_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("DEPARTMENTS")
+            fk_deps.add("LOCATIONS")
+
+        # ORDERS -> CUSTOMERS
+        if 'ORDERS' in created_tables and 'CUSTOMERS' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE ORDERS ADD CONSTRAINT ORD_CUST_FK\n"
+                "  FOREIGN KEY (CUSTOMER_ID) REFERENCES CUSTOMERS (CUSTOMER_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("ORDERS")
+            fk_deps.add("CUSTOMERS")
+
+        # ORDERS -> EMPLOYEES
+        if 'ORDERS' in created_tables and 'EMPLOYEES' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE ORDERS ADD CONSTRAINT ORD_EMP_FK\n"
+                "  FOREIGN KEY (SALESPERSON_ID) REFERENCES EMPLOYEES (EMPLOYEE_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("ORDERS")
+            fk_deps.add("EMPLOYEES")
+
+        # ORDER_ITEMS -> ORDERS
+        if 'ORDER_ITEMS' in created_tables and 'ORDERS' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE ORDER_ITEMS ADD CONSTRAINT ORDITM_ORD_FK\n"
+                "  FOREIGN KEY (ORDER_ID) REFERENCES ORDERS (ORDER_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("ORDER_ITEMS")
+            fk_deps.add("ORDERS")
+
+        # ORDER_ITEMS -> PRODUCTS
+        if 'ORDER_ITEMS' in created_tables and 'PRODUCTS' in created_tables:
+            fk_statements.append(
+                "ALTER TABLE ORDER_ITEMS ADD CONSTRAINT ORDITM_PROD_FK\n"
+                "  FOREIGN KEY (PRODUCT_ID) REFERENCES PRODUCTS (PRODUCT_ID)\n"
+                "  ENABLE VALIDATE;"
+            )
+            fk_deps.add("ORDER_ITEMS")
+            fk_deps.add("PRODUCTS")
+
+        if fk_statements:
+            constraint_obj = OracleObject("FOREIGN_KEYS", "CONSTRAINT")
+            constraint_obj.sql = "-- Foreign Key Constraints\n" + "\n\n".join(fk_statements)
+            for dep in fk_deps:
+                constraint_obj.add_dependency(dep)
+            self.objects.append(constraint_obj)
+
+        # Add check constraints - only for tables that exist
+        check_statements = []
+        check_deps = set()
+
+        if 'EMPLOYEES' in created_tables:
+            check_statements.append(
+                "ALTER TABLE EMPLOYEES ADD CONSTRAINT EMP_SALARY_MIN\n"
+                "  CHECK (SALARY > 0) ENABLE VALIDATE;"
+            )
+            check_deps.add("EMPLOYEES")
+
+        if 'JOBS' in created_tables:
+            check_statements.append(
+                "ALTER TABLE JOBS ADD CONSTRAINT JOB_SALARY_RANGE\n"
+                "  CHECK (MIN_SALARY < MAX_SALARY) ENABLE VALIDATE;"
+            )
+            check_deps.add("JOBS")
+
+        if 'ORDER_ITEMS' in created_tables:
+            check_statements.append(
+                "ALTER TABLE ORDER_ITEMS ADD CONSTRAINT ORDITM_QTY_MIN\n"
+                "  CHECK (QUANTITY > 0) ENABLE VALIDATE;"
+            )
+            check_deps.add("ORDER_ITEMS")
+
+        if 'PRODUCTS' in created_tables:
+            check_statements.append(
+                "ALTER TABLE PRODUCTS ADD CONSTRAINT PROD_PRICE_MIN\n"
+                "  CHECK (LIST_PRICE >= 0) ENABLE VALIDATE;"
+            )
+            check_deps.add("PRODUCTS")
+
+        if check_statements:
+            check_obj = OracleObject("CHECK_CONSTRAINTS", "CONSTRAINT")
+            check_obj.sql = "-- Check Constraints\n" + "\n\n".join(check_statements)
+            for dep in check_deps:
+                check_obj.add_dependency(dep)
+            self.objects.append(check_obj)
         
     def _generate_sequences(self) -> None:
         """Generate sequences for tables"""
@@ -354,36 +428,62 @@ CREATE SEQUENCE ORDERS_SEQ
     
     def _generate_comments(self) -> None:
         """Generate comments for tables and columns"""
-        comment_obj = OracleObject("COMMENTS", "COMMENT")
-        comment_obj.sql = """-- Table and Column Comments
-COMMENT ON TABLE EMPLOYEES IS 'Contains employee information including Japanese name fields';
-COMMENT ON COLUMN EMPLOYEES.EMPLOYEE_ID IS 'Primary key of employees table';
-COMMENT ON COLUMN EMPLOYEES.FIRST_NAME_JP IS 'First name in Japanese';
-COMMENT ON COLUMN EMPLOYEES.LAST_NAME_JP IS 'Last name in Japanese';
-COMMENT ON COLUMN EMPLOYEES.HIRE_DATE IS 'Date when the employee was hired';
+        created_tables = {t.name for t in self.tables}
+        comment_statements = []
+        comment_deps = set()
 
-COMMENT ON TABLE DEPARTMENTS IS 'Contains department information';
-COMMENT ON COLUMN DEPARTMENTS.DEPARTMENT_NAME_JP IS 'Department name in Japanese';
+        if 'EMPLOYEES' in created_tables:
+            comment_statements.extend([
+                "COMMENT ON TABLE EMPLOYEES IS 'Contains employee information including Japanese name fields';",
+                "COMMENT ON COLUMN EMPLOYEES.EMPLOYEE_ID IS 'Primary key of employees table';",
+                "COMMENT ON COLUMN EMPLOYEES.FIRST_NAME_JP IS 'First name in Japanese';",
+                "COMMENT ON COLUMN EMPLOYEES.LAST_NAME_JP IS 'Last name in Japanese';",
+                "COMMENT ON COLUMN EMPLOYEES.HIRE_DATE IS 'Date when the employee was hired';",
+            ])
+            comment_deps.add("EMPLOYEES")
 
-COMMENT ON TABLE JOBS IS 'Contains job information including salary ranges';
-COMMENT ON COLUMN JOBS.JOB_TITLE_JP IS 'Job title in Japanese';
+        if 'DEPARTMENTS' in created_tables:
+            comment_statements.extend([
+                "COMMENT ON TABLE DEPARTMENTS IS 'Contains department information';",
+                "COMMENT ON COLUMN DEPARTMENTS.DEPARTMENT_NAME_JP IS 'Department name in Japanese';",
+            ])
+            comment_deps.add("DEPARTMENTS")
 
-COMMENT ON TABLE CUSTOMERS IS 'Customer information table';
-COMMENT ON COLUMN CUSTOMERS.FIRST_NAME_JP IS 'Customer first name in Japanese';
-COMMENT ON COLUMN CUSTOMERS.LAST_NAME_JP IS 'Customer last name in Japanese';
+        if 'JOBS' in created_tables:
+            comment_statements.extend([
+                "COMMENT ON TABLE JOBS IS 'Contains job information including salary ranges';",
+                "COMMENT ON COLUMN JOBS.JOB_TITLE_JP IS 'Job title in Japanese';",
+            ])
+            comment_deps.add("JOBS")
 
-COMMENT ON TABLE ORDERS IS 'Order header information';
-COMMENT ON COLUMN ORDERS.SHIPPING_ADDRESS_JP IS 'Shipping address in Japanese';
+        if 'CUSTOMERS' in created_tables:
+            comment_statements.extend([
+                "COMMENT ON TABLE CUSTOMERS IS 'Customer information table';",
+                "COMMENT ON COLUMN CUSTOMERS.FIRST_NAME_JP IS 'Customer first name in Japanese';",
+                "COMMENT ON COLUMN CUSTOMERS.LAST_NAME_JP IS 'Customer last name in Japanese';",
+            ])
+            comment_deps.add("CUSTOMERS")
 
-COMMENT ON TABLE ORDER_ITEMS IS 'Order line items';
-COMMENT ON COLUMN ORDER_ITEMS.NOTES_JP IS 'Item notes in Japanese';"""
-        comment_obj.add_dependency("EMPLOYEES")
-        comment_obj.add_dependency("DEPARTMENTS")
-        comment_obj.add_dependency("JOBS")
-        comment_obj.add_dependency("CUSTOMERS")
-        comment_obj.add_dependency("ORDERS")
-        comment_obj.add_dependency("ORDER_ITEMS")
-        self.objects.append(comment_obj)
+        if 'ORDERS' in created_tables:
+            comment_statements.extend([
+                "COMMENT ON TABLE ORDERS IS 'Order header information';",
+                "COMMENT ON COLUMN ORDERS.SHIPPING_ADDRESS_JP IS 'Shipping address in Japanese';",
+            ])
+            comment_deps.add("ORDERS")
+
+        if 'ORDER_ITEMS' in created_tables:
+            comment_statements.extend([
+                "COMMENT ON TABLE ORDER_ITEMS IS 'Order line items';",
+                "COMMENT ON COLUMN ORDER_ITEMS.NOTES_JP IS 'Item notes in Japanese';",
+            ])
+            comment_deps.add("ORDER_ITEMS")
+
+        if comment_statements:
+            comment_obj = OracleObject("COMMENTS", "COMMENT")
+            comment_obj.sql = "-- Table and Column Comments\n" + "\n".join(comment_statements)
+            for dep in comment_deps:
+                comment_obj.add_dependency(dep)
+            self.objects.append(comment_obj)
     
     def get_tables(self) -> List[TableInfo]:
         """Get the list of tables"""

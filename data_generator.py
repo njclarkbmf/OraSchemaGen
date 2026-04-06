@@ -10,6 +10,7 @@ Author: John Clark Naldoza
 """
 
 import random
+import re
 from typing import List, Dict, Any
 from core import OracleObjectGenerator, OracleObject, TableInfo
 from faker import Faker
@@ -138,15 +139,20 @@ class DataGenerator(OracleObjectGenerator):
                             value = str(random.randint(1, min(max_val, 1000000)))
                 elif data_type == "DATE":
                     if 'HIRE' in column['name'].upper() or 'REGISTRATION' in column['name'].upper():
-                        value = self.fake_en.date_between(start_date='-5y', end_date='-1y').strftime('%Y-%m-%d')
+                        raw_date = self.fake_en.date_between(start_date='-5y', end_date='-1y')
+                        value = f"TO_DATE('{raw_date.strftime('%Y-%m-%d')}', 'YYYY-MM-DD')"
                     elif 'ORDER' in column['name'].upper():
-                        value = self.fake_en.date_between(start_date='-1y', end_date='today').strftime('%Y-%m-%d')
+                        raw_date = self.fake_en.date_between(start_date='-1y', end_date='today')
+                        value = f"TO_DATE('{raw_date.strftime('%Y-%m-%d')}', 'YYYY-MM-DD')"
                     elif 'SHIPPING' in column['name'].upper() or 'DELIVERY' in column['name'].upper():
-                        value = self.fake_en.date_between(start_date='-6m', end_date='today').strftime('%Y-%m-%d')
+                        raw_date = self.fake_en.date_between(start_date='-6m', end_date='today')
+                        value = f"TO_DATE('{raw_date.strftime('%Y-%m-%d')}', 'YYYY-MM-DD')"
                     else:
-                        value = self.fake_en.date_between(start_date='-5y', end_date='today').strftime('%Y-%m-%d')
+                        raw_date = self.fake_en.date_between(start_date='-5y', end_date='today')
+                        value = f"TO_DATE('{raw_date.strftime('%Y-%m-%d')}', 'YYYY-MM-DD')"
                 elif "TIMESTAMP" in data_type:
-                    value = self.fake_en.date_time_between(start_date='-5y', end_date='now').strftime('%Y-%m-%d %H:%M:%S')
+                    raw_ts = self.fake_en.date_time_between(start_date='-5y', end_date='now')
+                    value = f"TO_TIMESTAMP('{raw_ts.strftime('%Y-%m-%d %H:%M:%S')}', 'YYYY-MM-DD HH24:MI:SS')"
                 elif data_type == "CLOB":
                     if column['name'].lower().endswith('_jp') or column['name'].lower().endswith('_japanese'):
                         value = '\n'.join([self.fake_jp.paragraph() for _ in range(2)])
@@ -159,9 +165,16 @@ class DataGenerator(OracleObjectGenerator):
                     
                 # Format value for SQL
                 if isinstance(value, str) and not value.endswith("NEXTVAL") and value != "EMPTY_BLOB()":
-                    # Escape single quotes
-                    value = value.replace("'", "''")
-                    values.append(f"'{value}'")
+                    # Don't quote Oracle function calls (TO_DATE, TO_TIMESTAMP, etc.)
+                    if value.startswith("TO_DATE(") or value.startswith("TO_TIMESTAMP("):
+                        values.append(value)
+                    # Don't quote raw numeric strings (NUMBER column values)
+                    elif re.match(r'^-?\d+(\.\d+)?$', value):
+                        values.append(value)
+                    else:
+                        # Escape single quotes
+                        value = value.replace("'", "''")
+                        values.append(f"'{value}'")
                 else:
                     values.append(value)
             

@@ -166,28 +166,25 @@ BEGIN
   -- Standardize department name
   l_standard_name := INITCAP(TRIM(:NEW.DEPARTMENT_NAME));
   :NEW.DEPARTMENT_NAME := l_standard_name;
-  
+
   -- Check uniqueness of department name (case insensitive)
   SELECT COUNT(*)
   INTO l_dept_count
   FROM DEPARTMENTS
   WHERE UPPER(DEPARTMENT_NAME) = UPPER(l_standard_name)
   AND DEPARTMENT_ID != NVL(:NEW.DEPARTMENT_ID, -999);
-  
+
   IF l_dept_count > 0 THEN
-    RAISE_APPLICATION_ERROR(-20002, 
+    RAISE_APPLICATION_ERROR(-20002,
       'Department name "' || l_standard_name || '" already exists. Department names must be unique.');
   END IF;
-  
+
   -- Auto-generate Japanese department name if not provided
   IF :NEW.DEPARTMENT_NAME_JP IS NULL AND :NEW.DEPARTMENT_NAME IS NOT NULL THEN
     -- In a real system, this would use a translation service or lookup table
     -- For this example, we'll just append "部門" to the English name
     :NEW.DEPARTMENT_NAME_JP := :NEW.DEPARTMENT_NAME || ' 部門';
   END IF;
-  
-  -- Record last modification timestamp
-  :NEW.MODIFIED_DATE := SYSDATE;
 END;
 /"""
         dept_trigger.add_dependency("DEPARTMENTS")
@@ -257,8 +254,8 @@ BEGIN
   WHERE ORDER_ID = l_order_id;
 END;
 /"""
-        order_total_trigger.add_dependency("ORDERS")
         order_total_trigger.add_dependency("ORDER_ITEMS")
+        order_total_trigger.add_dependency("ORDERS")
         self.objects.append(order_total_trigger)
         
         # Status change validation trigger
@@ -380,33 +377,26 @@ BEGIN
   IF :NEW.EMAIL IS NOT NULL THEN
     :NEW.EMAIL := LOWER(TRIM(:NEW.EMAIL));
   END IF;
-  
-  -- Normalize phone number format
+
+  -- Normalize phone number format (remove non-digit characters except +)
   IF :NEW.PHONE IS NOT NULL THEN
-    -- Remove any non-digit characters except +
     :NEW.PHONE := REGEXP_REPLACE(:NEW.PHONE, '[^0-9+]', '');
-    
-    -- Ensure proper format for Japanese numbers if they start with +81
-    IF SUBSTR(:NEW.PHONE, 1, 3) = '+81' THEN
-      -- Format as +81-XX-XXXX-XXXX (standard Japanese format)
-      :NEW.PHONE := REGEXP_REPLACE(:NEW.PHONE, '\\+81([0-9]{2})([0-9]{4})([0-9]{4})', '+81-\\1-\\2-\\3');
-    END IF;
   END IF;
-  
+
   -- Normalize postal code format
   IF :NEW.POSTAL_CODE IS NOT NULL THEN
     -- For Japanese postal codes (NNN-NNNN format)
     IF :NEW.COUNTRY = 'Japan' OR :NEW.COUNTRY_JP = '日本' THEN
       -- Remove any non-digit characters first
       :NEW.POSTAL_CODE := REGEXP_REPLACE(:NEW.POSTAL_CODE, '[^0-9]', '');
-      
+
       -- Format as NNN-NNNN if 7 digits
       IF LENGTH(:NEW.POSTAL_CODE) = 7 THEN
         :NEW.POSTAL_CODE := SUBSTR(:NEW.POSTAL_CODE, 1, 3) || '-' || SUBSTR(:NEW.POSTAL_CODE, 4);
       END IF;
     END IF;
   END IF;
-  
+
   -- Set registration date for new customers
   IF INSERTING AND :NEW.REGISTRATION_DATE IS NULL THEN
     :NEW.REGISTRATION_DATE := SYSDATE;

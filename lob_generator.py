@@ -46,56 +46,60 @@ CREATE OR REPLACE PROCEDURE APPEND_TO_CLOB(
   p_pk_column IN VARCHAR2,
   p_pk_value IN VARCHAR2,
   p_text_to_append IN VARCHAR2,
-  p_add_newline IN BOOLEAN DEFAULT TRUE
+  p_add_newline IN VARCHAR2 DEFAULT 'Y'
 )
 IS
   l_clob CLOB;
-  l_sql VARCHAR2(4000);
+  l_sql VARCHAR2(32767);
   l_count NUMBER;
+  l_do_newline BOOLEAN;
 BEGIN
+  -- Convert VARCHAR2 flag to BOOLEAN for internal use
+  l_do_newline := (UPPER(p_add_newline) IN ('Y', 'YES', 'TRUE', '1'));
+
   -- Validate parameters
   IF p_table_name IS NULL OR p_column_name IS NULL OR p_pk_column IS NULL OR p_pk_value IS NULL THEN
     RAISE_APPLICATION_ERROR(-20001, 'Required parameters cannot be NULL');
   END IF;
-  
+
   -- Check if the record exists
-  EXECUTE IMMEDIATE 
-    'SELECT COUNT(*) FROM ' || p_table_name || 
+  EXECUTE IMMEDIATE
+    'SELECT COUNT(*) FROM ' || p_table_name ||
     ' WHERE ' || p_pk_column || ' = :1'
   INTO l_count
   USING p_pk_value;
-  
+
   IF l_count = 0 THEN
     RAISE_APPLICATION_ERROR(-20002, 'Record not found');
   END IF;
-  
+
   -- Get the current CLOB value
-  l_sql := 'SELECT ' || p_column_name || ' FROM ' || p_table_name || 
+  l_sql := 'SELECT ' || p_column_name || ' FROM ' || p_table_name ||
            ' WHERE ' || p_pk_column || ' = :1 FOR UPDATE';
-  
+
   EXECUTE IMMEDIATE l_sql INTO l_clob USING p_pk_value;
-  
+
   -- Initialize CLOB if NULL
   IF l_clob IS NULL THEN
     l_clob := EMPTY_CLOB();
   END IF;
-  
+
   -- Append the text
-  IF p_add_newline AND DBMS_LOB.GETLENGTH(l_clob) > 0 THEN
+  IF l_do_newline AND DBMS_LOB.GETLENGTH(l_clob) > 0 THEN
     -- Add a newline before appending if requested and CLOB is not empty
     DBMS_LOB.APPEND(l_clob, CHR(10));
   END IF;
-  
+
   -- Append the new text
   DBMS_LOB.APPEND(l_clob, p_text_to_append);
-  
+
   -- Update the CLOB in the table
-  l_sql := 'UPDATE ' || p_table_name || 
+  l_sql := 'UPDATE ' || p_table_name ||
            ' SET ' || p_column_name || ' = :1' ||
            ' WHERE ' || p_pk_column || ' = :2';
-  
+
   EXECUTE IMMEDIATE l_sql USING l_clob, p_pk_value;
-  
+
   COMMIT;
 EXCEPTION
   WHEN OTHERS THEN
@@ -166,7 +170,7 @@ CREATE OR REPLACE FUNCTION SEARCH_CLOB(
   p_search_string IN VARCHAR2,
   p_start_position IN NUMBER DEFAULT 1,
   p_occurrence IN NUMBER DEFAULT 1,
-  p_case_sensitive IN BOOLEAN DEFAULT TRUE
+  p_case_sensitive IN VARCHAR2 DEFAULT 'Y'
 ) RETURN NUMBER
 IS
   l_position NUMBER := p_start_position;
@@ -177,55 +181,59 @@ IS
   l_clob_length NUMBER;
   l_search_expr VARCHAR2(100);
   l_search_string VARCHAR2(1000) := p_search_string;
+  l_case_sensitive BOOLEAN;
 BEGIN
+  -- Convert VARCHAR2 flag to BOOLEAN for internal use
+  l_case_sensitive := (UPPER(p_case_sensitive) IN ('Y', 'YES', 'TRUE', '1'));
+
   -- Handle NULL input
   IF p_clob IS NULL OR p_search_string IS NULL THEN
     RETURN 0;
   END IF;
-  
+
   -- Get CLOB length
   l_clob_length := DBMS_LOB.GETLENGTH(p_clob);
-  
+
   -- Return 0 if CLOB is empty
   IF l_clob_length = 0 THEN
     RETURN 0;
   END IF;
-  
+
   -- Handle case sensitivity
-  IF NOT p_case_sensitive THEN
+  IF NOT l_case_sensitive THEN
     l_search_string := UPPER(p_search_string);
   END IF;
-  
+
   -- Search in chunks
   WHILE l_position <= l_clob_length LOOP
     -- Read a chunk
     l_chunk := GET_CLOB_SUBSTRING(p_clob, l_position, l_chunk_size);
-    
+
     -- Handle case sensitivity
-    IF NOT p_case_sensitive THEN
+    IF NOT l_case_sensitive THEN
       l_chunk := UPPER(l_chunk);
     END IF;
-    
+
     -- Search in chunk
     l_chunk_pos := INSTR(l_chunk, l_search_string);
-    
+
     -- Found match in this chunk
     WHILE l_chunk_pos > 0 LOOP
       l_occurrence := l_occurrence + 1;
-      
+
       -- If this is the occurrence we're looking for
       IF l_occurrence = p_occurrence THEN
         RETURN l_position + l_chunk_pos - 1;
       END IF;
-      
+
       -- Look for next occurrence in this chunk
       l_chunk_pos := INSTR(l_chunk, l_search_string, l_chunk_pos + 1);
     END LOOP;
-    
+
     -- Move to next chunk
     l_position := l_position + l_chunk_size;
   END LOOP;
-  
+
   -- Return 0 if not found or occurrence is not found
   RETURN 0;
 END SEARCH_CLOB;
@@ -370,71 +378,50 @@ END BASE64_TO_BLOB;
         """Generate document storage procedures"""
         # Procedure to store document
         store_doc_proc = OracleObject("STORE_DOCUMENT", "PROCEDURE")
-        store_doc_proc.sql = f"""-- Procedure to store a document in a BLOB column
+        store_doc_proc.sql = f"""-- Procedure to store a document in a BLOB column using dynamic SQL
 CREATE OR REPLACE PROCEDURE STORE_DOCUMENT(
   p_table_name IN VARCHAR2,
-  p_column_name IN VARCHAR2,
+  p_blob_column IN VARCHAR2,
   p_pk_column IN VARCHAR2,
   p_pk_value IN VARCHAR2,
-  p_document_data IN BLOB,
-  p_document_name IN VARCHAR2,
-  p_mime_type IN VARCHAR2,
-  p_metadata_column IN VARCHAR2 DEFAULT NULL,
-  p_metadata IN CLOB DEFAULT NULL
+  p_document_data IN BLOB
 )
 IS
-  l_sql VARCHAR2(4000);
+  l_sql VARCHAR2(32767);
   l_count NUMBER;
-  l_metadata_update VARCHAR2(1000);
 BEGIN
   -- Validate parameters
-  IF p_table_name IS NULL OR p_column_name IS NULL OR 
+  IF p_table_name IS NULL OR p_blob_column IS NULL OR
      p_pk_column IS NULL OR p_pk_value IS NULL OR
      p_document_data IS NULL THEN
     RAISE_APPLICATION_ERROR(-20001, 'Required parameters cannot be NULL');
   END IF;
-  
+
   -- Check if the record exists
-  EXECUTE IMMEDIATE 
-    'SELECT COUNT(*) FROM ' || p_table_name || 
+  EXECUTE IMMEDIATE
+    'SELECT COUNT(*) FROM ' || p_table_name ||
     ' WHERE ' || p_pk_column || ' = :1'
   INTO l_count
   USING p_pk_value;
-  
+
   IF l_count = 0 THEN
     RAISE_APPLICATION_ERROR(-20002, 'Record not found');
   END IF;
-  
-  -- Prepare metadata update if metadata column is provided
-  IF p_metadata_column IS NOT NULL THEN
-    l_metadata_update := ', ' || p_metadata_column || ' = :4';
-  ELSE
-    l_metadata_update := '';
-  END IF;
-  
-  -- Create dynamic SQL
-  l_sql := 'UPDATE ' || p_table_name || 
-           ' SET ' || p_column_name || ' = :1, ' ||
-           'DOCUMENT_NAME = :2, ' ||
-           'MIME_TYPE = :3' ||
-           l_metadata_update ||
-           ' WHERE ' || p_pk_column || ' = :5';
-  
+
+  -- Create dynamic SQL to update the BLOB column
+  l_sql := 'UPDATE ' || p_table_name ||
+           ' SET ' || p_blob_column || ' = :1' ||
+           ' WHERE ' || p_pk_column || ' = :2';
+
   -- Execute update
-  IF p_metadata_column IS NOT NULL THEN
-    EXECUTE IMMEDIATE l_sql
-    USING p_document_data, p_document_name, p_mime_type, p_metadata, p_pk_value;
-  ELSE
-    EXECUTE IMMEDIATE l_sql
-    USING p_document_data, p_document_name, p_mime_type, p_pk_value;
-  END IF;
-  
+  EXECUTE IMMEDIATE l_sql
+  USING p_document_data, p_pk_value;
+
   COMMIT;
-  
+
   -- Log document storage
   DBMS_OUTPUT.PUT_LINE(
-    'Document "' || p_document_name || '" (' || p_mime_type || ') ' ||
-    'stored in ' || p_table_name || '.' || p_column_name || 
+    'Document stored in ' || p_table_name || '.' || p_blob_column ||
     ' for ' || p_pk_column || ' = ' || p_pk_value
   );
 EXCEPTION

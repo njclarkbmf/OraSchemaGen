@@ -139,15 +139,19 @@ class PackageGenerator(OracleObjectGenerator):
             'parameters': [
                 {'name': 'p_string', 'data_type': 'VARCHAR2', 'in_out': 'IN'}
             ],
-            'return_type': 'BOOLEAN',
-            'description': 'Check if a string contains only numeric characters',
+            'return_type': 'VARCHAR2',
+            'description': 'Check if a string contains only numeric characters. Returns Y or N.',
             'body': '''
     IS
     BEGIN
-        RETURN REGEXP_LIKE(p_string, '^[0-9]+$');
+        IF REGEXP_LIKE(p_string, '^[0-9]+$') THEN
+            RETURN 'Y';
+        ELSE
+            RETURN 'N';
+        END IF;
     EXCEPTION
         WHEN OTHERS THEN
-            RETURN FALSE;
+            RETURN 'N';
     END;'''
         })
         
@@ -166,8 +170,8 @@ class PackageGenerator(OracleObjectGenerator):
                 'parameters': [
                     {'name': f"p_{pk_col.lower()}", 'data_type': 'NUMBER', 'in_out': 'IN'}
                 ],
-                'return_type': 'BOOLEAN',
-                'description': f"Check if {table_name} record exists by ID",
+                'return_type': 'VARCHAR2',
+                'description': f"Check if {table_name} record exists by ID. Returns Y or N.",
                 'body': f'''
     IS
         v_count NUMBER;
@@ -175,11 +179,15 @@ class PackageGenerator(OracleObjectGenerator):
         SELECT COUNT(*) INTO v_count
         FROM {table_name}
         WHERE {pk_col} = p_{pk_col.lower()};
-        
-        RETURN (v_count > 0);
+
+        IF v_count > 0 THEN
+            RETURN 'Y';
+        ELSE
+            RETURN 'N';
+        END IF;
     EXCEPTION
         WHEN OTHERS THEN
-            RETURN FALSE;
+            RETURN 'N';
     END;'''
             })
             
@@ -191,18 +199,18 @@ class PackageGenerator(OracleObjectGenerator):
                     'name': f"validate_{table_name.lower()}",
                     'parameters': [
                         {'name': f"p_{pk_col.lower()}", 'data_type': 'NUMBER', 'in_out': 'IN'},
-                        {'name': 'p_is_valid', 'data_type': 'BOOLEAN', 'in_out': 'OUT'},
+                        {'name': 'p_is_valid', 'data_type': 'VARCHAR2', 'in_out': 'OUT'},
                         {'name': 'p_error_message', 'data_type': 'VARCHAR2', 'in_out': 'OUT'}
                     ],
-                    'description': f"Validate {table_name} record",
+                    'description': f"Validate {table_name} record. p_is_valid returns Y or N.",
                     'body': f'''
     IS
         v_record {table_name}%ROWTYPE;
     BEGIN
         -- Initialize output parameters
-        p_is_valid := TRUE;
+        p_is_valid := 'Y';
         p_error_message := NULL;
-        
+
         -- Check if record exists
         BEGIN
             SELECT * INTO v_record
@@ -210,23 +218,23 @@ class PackageGenerator(OracleObjectGenerator):
             WHERE {pk_col} = p_{pk_col.lower()};
         EXCEPTION
             WHEN NO_DATA_FOUND THEN
-                p_is_valid := FALSE;
+                p_is_valid := 'N';
                 p_error_message := '{table_name} record not found';
                 RETURN;
         END;
-        
+
         -- Perform validation checks
         IF v_record.{sample_column} IS NULL THEN
-            p_is_valid := FALSE;
+            p_is_valid := 'N';
             p_error_message := '{sample_column} cannot be null';
             RETURN;
         END IF;
-        
+
         -- Record is valid
-        p_is_valid := TRUE;
+        p_is_valid := 'Y';
     EXCEPTION
         WHEN OTHERS THEN
-            p_is_valid := FALSE;
+            p_is_valid := 'N';
             p_error_message := 'Error: ' || SQLERRM;
     END;'''
                 })

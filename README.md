@@ -1,203 +1,230 @@
 # OraSchemaGen
 
-OraSchemaGen is a modular Python tool for generating Oracle database schemas, including tables, constraints, indexes, data, and PL/SQL objects (triggers, procedures, functions, and packages). It features bilingual support for English and Japanese content.
+OraSchemaGen is a modular Python tool that generates Oracle DDL and PL/SQL as SQL scripts. It produces CREATE TABLE statements, constraints, indexes, sequences, comments, triggers, procedures, functions, packages, and LOB utility code -- along with bilingual English/Japanese sample data using the Faker library.
 
-## Features
+**What it does:** Generates SQL scripts that you can review and execute against an Oracle database yourself.
 
-- Generate complete Oracle database schemas
-- Create realistic sample data
-- Generate PL/SQL objects (triggers, procedures, functions, packages)
-- Bilingual support (English and Japanese)
-- Modular architecture for easy extension
-- Configurable via command-line options
+**What it does NOT do:**
+- Does NOT connect to a live Oracle database
+- Does NOT execute the generated SQL
+- Does NOT guarantee 100% Oracle compatibility for all edge cases
+- Is NOT a replacement for proper Oracle schema design
 
-## Progress Tracking
+All generated SQL **must be reviewed** before executing against any database, especially production.
 
-OraSchemaGen includes visual progress tracking using tqdm to provide real-time feedback during schema generation:
+## Supported Oracle Versions
 
-- Progress bars for each schema being generated
-- Component-specific progress (tables, data, triggers, etc.)
-- File generation progress
+Oracle Database 12c Release 2 through 19c.
 
-### Progress Options
+## Prerequisites
 
-| Option | Description |
-|--------|-------------|
-| `--no-progress` | Disable progress bars for cleaner log output |
-
-Progress bars are particularly useful when generating large schemas with many rows of data, making it easy to track the generation status and estimate completion time.
-
+- Python 3.7+
+- `faker` library
+- `tqdm` library
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.7+
-- Oracle client libraries (if connecting to Oracle databases)
-
-### Setup
-
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/yourusername/OraSchemaGen.git
 cd OraSchemaGen
 ```
 
-2. Create and activate a virtual environment:
+2. Create and activate a virtual environment (recommended):
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
-3. Install required dependencies:
+3. Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Usage
 
-### Basic Usage
-
-To generate a basic schema with default settings:
+### Basic
 
 ```bash
 python main.py
 ```
 
-This will create a schema with 5 tables and minimal data in the `generated_sql` directory.
+Generates 5 tables with 100 rows of sample data each, plus default counts of triggers, procedures, functions, packages, and LOB objects. Output goes to the `generated_sql/` directory.
 
-### Advanced Usage
+### Common Examples
 
 ```bash
-python main.py --schemas "HR,FINANCE" --tables 10 --data-rows 500 --triggers 5 --procedures 5 --functions 3 --packages 2 --lobs 1 --output-dir "my_sql_files" --verbose
+# Custom counts and output directory
+python main.py --tables 8 --data-rows 100 --output-dir my_output
+
+# Single consolidated SQL file
+python main.py --single-file
+
+# Disable progress bars (cleaner for scripting/logging)
+python main.py --no-progress
+
+# Multiple schemas
+python main.py --schemas "HR,FINANCE" --tables 10
+
+# Full options
+python main.py \
+  --schemas "HR" \
+  --tables 10 \
+  --data-rows 500 \
+  --triggers 5 \
+  --procedures 5 \
+  --functions 3 \
+  --packages 2 \
+  --lobs 1 \
+  --output-dir "my_sql_files" \
+  --single-file \
+  --verbose
 ```
 
 ### Command-line Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--schemas` | Comma-separated list of schema names | TEST_SCHEMA |
-| `--tables` | Number of tables to generate per schema | 5 |
-| `--data-rows` | Number of data rows to generate per table | 100 |
-| `--triggers` | Number of triggers to generate per schema | 3 |
-| `--procedures` | Number of procedures to generate per schema | 3 |
-| `--functions` | Number of functions to generate per schema | 3 |
-| `--packages` | Number of packages to generate per schema | 1 |
-| `--lobs` | Number of LOB operations to generate per schema | 1 |
-| `--output-dir` | Directory to save generated SQL | generated_sql |
-| `--single-file` | Generate a single SQL file instead of multiple files | False |
-| `--shift-jis` | Convert output files to Shift-JIS encoding | False |
-| `--verbose` | Enable verbose logging | False |
+| `--schemas` | Comma-separated list of schema names | `TEST_SCHEMA` |
+| `--tables` | Number of tables per schema | `5` |
+| `--data-rows` | Rows of sample data per table | `100` |
+| `--triggers` | Number of triggers per schema | `3` |
+| `--procedures` | Number of procedures per schema | `3` |
+| `--functions` | Number of functions per schema | `3` |
+| `--packages` | Number of packages per schema | `1` |
+| `--lobs` | Number of LOB operation objects per schema | `1` |
+| `--output-dir` | Output directory for SQL files | `generated_sql` |
+| `--single-file` | Write one SQL file instead of multiple | `False` |
+| `--shift-jis` | Convert output to Shift-JIS encoding | `False` |
+| `--verbose` | Enable debug-level logging | `False` |
+| `--quiet` | Suppress INFO-level logging | `False` |
+| `--no-progress` | Disable progress bars | `False` |
 
-## Project Structure
+### Selective Generation
 
-The project follows a modular architecture with the following components:
+Object types are included based on their count flags. Set a count to `0` to skip that object type entirely:
 
-- `main.py` - Main program that ties everything together
-- `core.py` - Core classes and base functionality
-- `schema_generator.py` - Table and basic schema generation
-- `data_generator.py` - Test data generation
-- `trigger_generator.py` - Trigger generation
-- `procedure_generator.py` - Procedure generation
-- `function_generator.py` - Function generation
-- `package_generator.py` - Package generation
-- `lob_generator.py` - LOB operations generation
-
-### Architecture
-
-OraSchemaGen uses a modular architecture based on object generators:
-
-1. `OracleObject` - Base class for database objects
-2. `OracleObjectGenerator` - Abstract base class for generators
-3. `OracleObjectFactory` - Factory for creating generators
-4. `OutputHandler` - Handles writing to files
-
-Each generator inherits from `OracleObjectGenerator` and implements a `generate()` method that produces `OracleObject` instances.
-
-## Example Generated Objects
-
-### Tables
-
-```sql
-CREATE TABLE EMPLOYEES 
-(
-  EMPLOYEE_ID NUMBER(6) NOT NULL,
-  FIRST_NAME VARCHAR2(20),
-  LAST_NAME VARCHAR2(25) NOT NULL,
-  FIRST_NAME_JP VARCHAR2(20),
-  LAST_NAME_JP VARCHAR2(25),
-  EMAIL VARCHAR2(25) NOT NULL,
-  PHONE_NUMBER VARCHAR2(20),
-  HIRE_DATE DATE NOT NULL,
-  JOB_ID VARCHAR2(10) NOT NULL,
-  SALARY NUMBER(8,2),
-  COMMISSION_PCT NUMBER(2,2),
-  MANAGER_ID NUMBER(6),
-  DEPARTMENT_ID NUMBER(4),
-  NOTES_JP CLOB,
-  CONSTRAINT EMPLOYEES_PK PRIMARY KEY (EMPLOYEE_ID)
-)
-TABLESPACE USERS PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
-NOLOGGING STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
-PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
-BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT);
+```bash
+# Tables and data only -- no PL/SQL objects
+python main.py --triggers 0 --procedures 0 --functions 0 --packages 0 --lobs 0
 ```
+
+## Generated Object Types
+
+### DDL Objects
+
+- **Tables** with column definitions and data types
+- **Primary key constraints**
+- **Unique constraints**
+- **Check constraints**
+- **Foreign key constraints** (only for tables that are actually created)
+- **Indexes** (on foreign key and frequently queried columns)
+- **Sequences** (for primary key auto-increment)
+- **Comments** on tables and columns (bilingual EN/JP)
+- **Storage clauses** (assumes a `USERS` tablespace exists)
+
+### PL/SQL Objects
+
+- **Triggers** -- including BEFORE INSERT (for PK population), BEFORE UPDATE (audit columns), and system-level triggers (AFTER DDL ON DATABASE, AFTER LOGON ON DATABASE). System triggers require DBA privileges.
+- **Procedures** -- CRUD-style procedures for generated tables. Procedures use `VARCHAR2('Y'/'N')` instead of `BOOLEAN` for OUT parameters so they are callable from SQL (Oracle does not support BOOLEAN in SQL context).
+- **Functions** -- Utility functions (date formatting, validation, lookups).
+- **Packages** -- Grouped procedures and functions with matching spec and body signatures. Package spec and body signatures are guaranteed to match.
+- **LOB utilities** -- Helper procedures for CLOB/BLOB read, write, and append operations.
 
 ### Sample Data
 
-```sql
-INSERT INTO EMPLOYEES (EMPLOYEE_ID, FIRST_NAME, LAST_NAME, FIRST_NAME_JP, LAST_NAME_JP, EMAIL, PHONE_NUMBER, HIRE_DATE, JOB_ID, SALARY, COMMISSION_PCT, MANAGER_ID, DEPARTMENT_ID) 
-VALUES (EMPLOYEES_SEQ.NEXTVAL, 'John', 'Smith', '山田', '太郎', 'JSMITH', '555-123-4567', '2020-05-15', 'IT_PROG', '65000', NULL, '103', '60');
+- Bilingual INSERT statements with English and Japanese values
+- Columns ending in `_JP` or `_JAPANESE` contain Japanese-generated content
+- DATE and TIMESTAMP columns use explicit `TO_DATE` / `TO_TIMESTAMP` with format masks
+
+## Output Format
+
+Output is UTF-8 encoded SQL scripts organized as:
+
+```
+generated_sql/
+├── DDL/
+│   ├── 01_tables.sql
+│   ├── 02_constraints.sql
+│   ├── 03_indexes.sql
+│   ├── 04_sequences.sql
+│   └── 05_comments.sql
+├── DATA/
+│   └── 01_data.sql
+├── TRIGGERS/
+│   └── 01_triggers.sql
+├── PROCEDURES/
+│   └── 01_procedures.sql
+├── FUNCTIONS/
+│   └── 01_functions.sql
+├── PACKAGES/
+│   ├── 01_package_spec.sql
+│   └── 02_package_body.sql
+└── LOBS/
+    └── 01_lob_utilities.sql
 ```
 
-### PL/SQL Packages
+Use `--single-file` to consolidate all output into one `.sql` file. Use `--shift-jis` for Shift-JIS encoded output (only supported with `--single-file`).
 
-```sql
-CREATE OR REPLACE PACKAGE HR_PKG_1 AS
-    -- Constants
-    C_MAX_ATTEMPTS CONSTANT INTEGER := 3;
-    C_DEFAULT_PAGE_SIZE CONSTANT INTEGER := 25;
+## Validation
 
-    -- Functions
-    -- Format a date using specified format
-    FUNCTION get_formatted_date(p_date IN DATE, p_format IN VARCHAR2 DEFAULT 'YYYY-MM-DD') RETURN VARCHAR2;
+A test suite is included to verify basic generation behavior:
 
-    -- Check if a string contains only numeric characters
-    FUNCTION is_numeric(p_string IN VARCHAR2) RETURN BOOLEAN;
-
-    -- Procedures
-    -- Validate EMPLOYEES record
-    PROCEDURE validate_employees(p_employee_id IN NUMBER, p_is_valid OUT BOOLEAN, p_error_message OUT VARCHAR2);
-END HR_PKG_1;
-/
+```bash
+python -m unittest tests.test_sql_generation -v
 ```
 
-## Bilingual Support
+## Known Limitations
 
-OraSchemaGen generates bilingual content for tables and data. Fields ending with `_JP` or `_JAPANESE` will contain Japanese content.
+1. **Review required:** All generated SQL must be reviewed before executing against production databases. The output is a starting point, not a finished product.
+2. **Storage clauses:** Table storage clauses assume a `USERS` tablespace exists. Adjust or remove if your environment differs.
+3. **System triggers:** AFTER DDL ON DATABASE and AFTER LOGON ON DATABASE triggers require DBA privileges and are not appropriate for all environments.
+4. **VARCHAR2 instead of BOOLEAN:** Generated procedures use `VARCHAR2('Y'/'N')` instead of `BOOLEAN` for OUT parameters because Oracle does not support BOOLEAN in SQL context.
+5. **Date literals:** DATE and TIMESTAMP columns use explicit `TO_DATE` / `TO_TIMESTAMP` calls with format masks in generated INSERT statements.
+6. **Foreign keys:** Foreign key constraints are only generated for tables that are actually created within the same generation run. Cross-schema or pre-existing table references are not handled.
+7. **Package consistency:** Package spec and body signatures are guaranteed to match, but the generated procedure/function bodies are templates -- adjust logic to your needs.
+8. **Oracle version coverage:** Tested against Oracle 12cR2 through 19c behavior. Older versions (11g and earlier) and newer versions (21c+) are not guaranteed to work without modification.
+9. **No database connection:** This tool generates SQL files only. It does not connect to, query, or execute against any database.
 
-For example:
+## Architecture
 
-```sql
-INSERT INTO EMPLOYEES (FIRST_NAME, LAST_NAME, FIRST_NAME_JP, LAST_NAME_JP) 
-VALUES ('John', 'Smith', '山田', '太郎');
-```
+OraSchemaGen uses a modular generator architecture:
+
+| Module | Responsibility |
+|--------|---------------|
+| `core.py` | Base classes (`OracleObject`, `OracleObjectGenerator`, `OracleObjectFactory`, `OutputHandler`, `TableInfo`) |
+| `schema_generator.py` | Table DDL, constraints, indexes, sequences, comments |
+| `data_generator.py` | Bilingual sample data (INSERT statements) via Faker |
+| `trigger_generator.py` | Row-level and system-level triggers |
+| `procedure_generator.py` | CRUD-style procedures |
+| `function_generator.py` | Utility functions |
+| `package_generator.py` | Package specs and bodies |
+| `lob_generator.py` | CLOB/BLOB utility procedures |
+| `main.py` | CLI entry point, orchestration |
+
+Each generator implements `OracleObjectGenerator` and produces `OracleObject` instances. The `OracleObjectFactory` creates the appropriate generators based on CLI flags. `OutputHandler` writes the results to files.
+
+## Documentation
+
+- **Architecture Decision Records (ADRs):** See `docs/adr/` for recorded design decisions.
+- **Design Principles and Patterns:** See `docs/principles-and-patterns.md` for the architectural principles guiding this project.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome.
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Make your changes
+4. Run the test suite: `python -m unittest tests.test_sql_generation -v`
+5. Commit and push
+6. Open a Pull Request
+
+Please keep changes focused and include tests where applicable.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- The Oracle documentation for SQL and PL/SQL syntax
-- The Faker library for generating realistic sample data
+MIT. See the [LICENSE](LICENSE) file for details.
